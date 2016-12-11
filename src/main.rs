@@ -1,10 +1,8 @@
 extern crate hyper;
+mod static_file;
 
-use std::fs;
-use std::io::ErrorKind::NotFound;
 use hyper::server::{Server, Request, Response};
-use hyper::method::Method::{Get, Head};
-use hyper::uri::RequestUri::AbsolutePath;
+use static_file::StaticFile;
 
 //type Middleware = for<'a, 'b, 'c> fn(req: Request<'a, 'b>, res: Response<'c>) -> Option<(Request<'a, 'b>, Response<'c>)>;
 
@@ -123,43 +121,13 @@ fn logger<'a, 'b, 'c, Ctx>(req: Request<'a, 'b>, res: Response<'c>, context: Ctx
     Some((req, res, context))
 }
 
-//fn staticFile(fsRoot: String, httpRoot: String) -> Middleware {
-    //fn middleware<'a, 'b, 'c>(req: Request<'a, 'b>, res: Response<'c>) -> Option<(Request<'a, 'b>, Response<'c>)> {
-        //println!("LOG {:?}", req.uri);
-        //match req.method {
-            //Get | Head => {
-                //match req.uri {
 
-                    //AbsolutePath(ref path) => {
-                        //let path = path.splitn(2, '?').next().unwrap();
-                        //let path = match path {
-                            //"/" => "index.html",
-                            //path => &path[1..],
-                        //};
+fn router<'a, 'b, 'c, Ctx: std::fmt::Debug>(_req: Request<'a, 'b>, res: Response<'c>, _context: Ctx)
+    -> Option<(Request<'a, 'b>, Response<'c>, Ctx)> {
 
-                         //match fs::metadata(&path) {
-                            //Ok(ref attr) if attr.is_file() => {
-                                //res.send(path.as_bytes());
-                            //},
-                            //Err(ref e) if e.kind() != NotFound => println!("Error getting metadata for file '{:?}': {:?}", path, e),
-                            //_ => {},
-                        //}
-                    //},
-                    //_ => return Some((req, res)),
-                //}
-            //},
-            //_ => return Some((req, res)),
-        //}
-
-        //None
-    //}
-
-    //return middleware;
-//}
-
-fn router<'a, 'b, 'c, Ctx>(req: Request<'a, 'b>, res: Response<'c>, context: Ctx) -> Option<(Request<'a, 'b>, Response<'c>, Ctx)> {
-    let s = format!("Hi mofo {}", req.uri);
-    res.send(s.as_bytes()).unwrap();
+    //let s = format!("Hi mofo {} with context {:?}", req.uri, context);
+    //res.send(s.as_bytes()).unwrap();
+    res.send_file("./src/main.rs".to_string());
     None
 }
 
@@ -167,14 +135,16 @@ fn router<'a, 'b, 'c, Ctx>(req: Request<'a, 'b>, res: Response<'c>, context: Ctx
 // follow the stream of middleware
 fn handler(req: Request, res: Response) {
 
-    let context: Vec<String> = vec!();
-    let l = &logger;
-    let r = &router;
-    let middleware: Vec<&Middleware<Vec<String>>> = vec![l, r];
-    let (req, res, context) = endIfNone!(process_middleware(middleware, req, res, context));
+    let context: Vec<String> = vec!("Context".to_string());
+    let middleware: Vec<Box<Middleware<Vec<String>>>> = vec![
+        Box::new(logger),
+        Box::new(StaticFile::new("/public".to_string(), "./public".to_string())),
+        Box::new(router),
+    ];
+    let (_req, _res, _context) = endIfNone!(process_middleware(middleware, req, res, context));
 }
 
-trait Middleware<Ctx> {
+pub trait Middleware<Ctx> {
     fn handle<'a, 'b, 'c>(&self, req: Request<'a, 'b>, res: Response<'c>, context: Ctx)
         -> Option<(Request<'a, 'b>, Response<'c>, Ctx)>;
 }
@@ -190,7 +160,7 @@ impl<F, Ctx> Middleware<Ctx> for F
 }
 
 
-fn process_middleware<'a, 'b, 'c, Ctx>(middleware_vec: Vec<&Middleware<Ctx>>, req: Request<'a, 'b>, res: Response<'c>, context: Ctx)
+fn process_middleware<'a, 'b, 'c, Ctx>(middleware_vec: Vec<Box<Middleware<Ctx>>>, req: Request<'a, 'b>, res: Response<'c>, context: Ctx)
     -> Option<(Request<'a, 'b>, Response<'c>, Ctx)> {
 
     let mut value = Some((req, res, context));
@@ -202,6 +172,39 @@ fn process_middleware<'a, 'b, 'c, Ctx>(middleware_vec: Vec<&Middleware<Ctx>>, re
     }
 
     value
+}
+
+
+trait FileSender {
+    //TODO be abel to use string or str
+    fn send_file(self, path: String);
+}
+
+trait TemplateRenderer {
+    fn test(&self);
+}
+
+use std::io::{copy};
+use std::fs::File;
+use std::path::Path;
+
+impl<'a> FileSender for Response<'a> {
+    fn send_file(self, path: String) {
+        // TODO use mime types http://hyper.rs/mime.rs/mime/index.html
+        // TODO make a nice guess about common mime types
+        //
+
+        let path = Path::new(&path);
+        let mut file_stream = File::open(path).unwrap();
+        let mut output_stream = self.start().unwrap();
+        copy(&mut file_stream, &mut output_stream).unwrap();
+    }
+}
+
+impl<'a> TemplateRenderer for Response<'a> {
+    fn test(&self) {
+        println!("Am a trait ma");
+    }
 }
 
 //TODO
