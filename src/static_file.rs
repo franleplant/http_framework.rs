@@ -27,7 +27,7 @@ impl StaticFile {
         }
     }
 
-    fn serve_file<'a, 'b, 'c, Ctx>(&self, req: Request<'a, 'b>, res: Response<'c>, context: Ctx)
+    fn serve_file<'a, 'b, 'c, Ctx>(&self, req: Request<'a, 'b>, mut res: Response<'c>, context: Ctx)
         -> Option<(Request<'a, 'b>, Response<'c>, Ctx)> {
 
         if req.method == Get || req.method == Head {
@@ -40,9 +40,21 @@ impl StaticFile {
 
                         println!("static path {:?}", path);
 
+                        // TODO
+                        // well basically I have a problem here where send_file consumes self
+                        // but it might fail and returning as a result does not work
                         if path.is_file() {
-                            res.send_file(path.to_str().unwrap().to_string());
-                            return None;
+                            res = match res.send_file(path.to_str().unwrap()) {
+                                Ok(_) => return None,
+                                Err((res, _)) => res,
+                            }
+                        }
+
+                        if path.is_dir() {
+                            res = match res.send_file(path.join("index.html").to_str().unwrap()) {
+                                Ok(_) => return None,
+                                Err((res, _)) => res,
+                            }
                         }
                     }
                 }
@@ -62,10 +74,6 @@ fn url_to_file_path(url_path: &String) -> Option<PathBuf> {
 
     let path = url_struct.path();
     let path = Path::new(path);
-
-    if path.ends_with("/") {
-        path.join("index.html");
-    }
 
     Some(path.to_path_buf())
 }

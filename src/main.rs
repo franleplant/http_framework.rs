@@ -2,6 +2,7 @@ extern crate hyper;
 mod static_file;
 
 use hyper::server::{Server, Request, Response};
+use hyper::status::StatusCode;
 use static_file::StaticFile;
 
 //type Middleware = for<'a, 'b, 'c> fn(req: Request<'a, 'b>, res: Response<'c>) -> Option<(Request<'a, 'b>, Response<'c>)>;
@@ -139,9 +140,12 @@ fn handler(req: Request, res: Response) {
     let middleware: Vec<Box<Middleware<Vec<String>>>> = vec![
         Box::new(logger),
         Box::new(StaticFile::new("/public".to_string(), "./public".to_string())),
-        Box::new(router),
+        //Box::new(router),
     ];
-    let (_req, _res, _context) = endIfNone!(process_middleware(middleware, req, res, context));
+    let (_req, mut res, _context) = endIfNone!(process_middleware(middleware, req, res, context));
+
+    *res.status_mut() =  StatusCode::NotFound;
+    res.send(b"404 not found").unwrap();
 }
 
 pub trait Middleware<Ctx> {
@@ -175,29 +179,47 @@ fn process_middleware<'a, 'b, 'c, Ctx>(middleware_vec: Vec<Box<Middleware<Ctx>>>
 }
 
 
+use std::io::{copy, Error, ErrorKind};
+use std::fs::{self, File};
+use std::path::Path;
+use std::convert::Into;
+
 trait FileSender {
-    //TODO be abel to use string or str
-    fn send_file(self, path: String);
+    fn send_file<T: Into<String>>(self, path: T) -> Result<(), (Self, Error)> where Self: ::std::marker::Sized;
 }
 
 trait TemplateRenderer {
     fn test(&self);
 }
 
-use std::io::{copy};
-use std::fs::File;
-use std::path::Path;
 
 impl<'a> FileSender for Response<'a> {
-    fn send_file(self, path: String) {
+    fn send_file<T: Into<String>>(self, path: T) -> Result<(), (Response<'a>, Error)> {
         // TODO use mime types http://hyper.rs/mime.rs/mime/index.html
         // TODO make a nice guess about common mime types
         //
 
+        let path: String = path.into();
         let path = Path::new(&path);
-        let mut file_stream = File::open(path).unwrap();
+
+        match fs::metadata(path) {
+            Ok(metadata) => {
+                if metadata.is_dir() {
+                    return Err((self, Error::new(ErrorKind::NotFound, "requested path is a directory")));
+                }
+            },
+            Err(e) => return Err((self, e)),
+        };
+
+
+        let mut file_stream = match File::open(path) {
+            Ok(val) => val,
+            Err(e) => return Err((self, e)),
+        };
+
         let mut output_stream = self.start().unwrap();
         copy(&mut file_stream, &mut output_stream).unwrap();
+        Ok(())
     }
 }
 
@@ -208,7 +230,6 @@ impl<'a> TemplateRenderer for Response<'a> {
 }
 
 //TODO
-//- static file server
 //- Router
 //- templates/rendering
 //
